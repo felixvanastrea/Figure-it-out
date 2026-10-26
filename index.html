@@ -154,7 +154,8 @@ const sfx={
 /* ---------- world state ---------- */
 const LAST=18;
 let level=0,L={},busy=false,deaths=0,objs=[],parts=[],rings=[],stars=[],timers=[],gen=0;
-let shakeA=0,flashA=0,flashC='#fff',wipe=null,ctr={x:4,y:5},ctrOff=0,ctrV=0;
+let shakeA=0,flashA=0,flashC='#fff',wipe=null,ctr={x:4,y:5},ctrOff=0,ctrV=0,roll=null;
+const REWIND=5;
 
 function after(t,fn){timers.push({t,fn,g:gen})}
 function add(kind,x,y,d,ramp,extra){const o=Object.assign({kind,x,y,d,ramp,sc:0,v:0,tsc:1,a:1,delay:0,ox:0,oy:0},extra);objs.push(o);return o}
@@ -193,9 +194,9 @@ function bounceCounter(){ctrOff=-7;ctrV=0}
 
 /* ---------- flow ---------- */
 function startWipe(col,mid,done){wipe={phase:'out',t:0,col,mid,done}}
-function go(n,kind){busy=true;startWipe(kind==='fail'?'#b13e53':'#29366f',()=>setLevel(n),()=>{busy=false})}
+function go(n,kind,from){busy=true;startWipe(kind==='fail'?'#b13e53':'#29366f',()=>{setLevel(n);if(from&&from>n)roll={from,to:n,t:0,last:from}},()=>{busy=false})}
 function setLevel(n){
-  gen++;timers=[];objs=[];parts=[];rings=[];level=n;ctr={x:4,y:5};bounceCounter();L={};
+  gen++;timers=[];objs=[];parts=[];rings=[];level=n;ctr={x:4,y:5};bounceCounter();L={};roll=null;
   if(n>=1&&n<=LAST)L=LEVELS[n-1]()||{};
   if(!L.down)L.down=(p,e,onC)=>{if(onC){L.counter&&L.counter(p);return}const o=hit(p);if(o&&L.tap)L.tap(o,p,e)};
 }
@@ -208,7 +209,7 @@ function fail(){
   if(busy)return;busy=true;deaths++;sfx.fail();
   shakeA=RM?0:7;flashC='#b13e53';flashA=.55;shatter();
   try{navigator.vibrate&&navigator.vibrate([60,30,90])}catch(e){}
-  after(.5,()=>go(1,'fail'));
+  const from=level,to=Math.max(1,level-REWIND);after(.5,()=>go(to,'fail',from));
 }
 
 /* =========================================================
@@ -368,14 +369,16 @@ const LEVELS=[
       up(p,e){if(!dr||dr.id!==e.pointerId)return;const m=dr.m;dr=null;if(m<3&&e.type==='pointerup')fail()}
     }},
 
-  /* 18 the game fakes your death. don't fall for it: touch nothing */
-  ()=>{let fake=false,rev=false,still=0;
+  /* 18 the game fakes your death (and the rewind). don't fall for it: touch nothing */
+  ()=>{let fake=false,rev=false,still=0,heart=null,clock=0,beat=-1;const fakeTo=Math.max(1,LAST-REWIND);
     const Lv={glitch:false,counterText:null,
       down(){if(fake&&!rev)fail()},
-      update(dt){if(!fake||rev||busy)return;still+=dt;Lv.glitch=(still%1.1)<.1;if(still>=4.5)reveal()}};
+      update(dt){
+        if(heart&&!rev){clock+=dt;const b=Math.floor((clock-.6)/.6);if(clock>=.6&&b>beat){beat=b;heart.v+=.24;rings.push({x:heart.x,y:heart.y,r:12,v:1.1,life:1,col:R.red[2]});sfx.kick()}}
+        if(!fake||rev||busy)return;still+=dt;Lv.glitch=(still%1.1)<.1;if(still>=4.5)reveal()}};
     after(.7,()=>{busy=true;sfx.fail();shakeA=RM?0:7;flashC='#b13e53';flashA=.55;shatter();
-      startWipe('#b13e53',()=>{objs=[];parts=[];fake=true;Lv.counterText='1';ctr={x:4,y:5};bounceCounter();
-        const d=sz(.24),odd=rand(3);spots([d,d,d]).forEach((p,i)=>add('disc',p.x,p.y,d,i===odd?R.blue:R.red,{delay:i*.07}))},
+      startWipe('#b13e53',()=>{objs=[];parts=[];fake=true;Lv.counterText=String(fakeTo);ctr={x:4,y:5};bounceCounter();roll={from:LAST,to:fakeTo,t:0,last:LAST};
+        heart=add('heart',W/2,H*.5,0,R.red,{nohit:1,flash:0,tsc:1.4})},
       ()=>{busy=false})});
     function reveal(){rev=true;busy=true;Lv.glitch=true;sfx.glitch();shakeA=RM?0:9;
       after(.4,()=>{objs.forEach(o=>burst(o.x,o.y,R.blue.concat(R.red),16,2.2));objs=[];Lv.counterText=null;Lv.glitch=false;bounceCounter();busy=false;pass(W/2,H/2)})}
@@ -384,7 +387,7 @@ const LEVELS=[
 
 /* ---------- input ---------- */
 function toP(e){const r=cv.getBoundingClientRect();return{x:(e.clientX-r.left)/r.width*W,y:(e.clientY-r.top)/r.height*H}}
-function counterStr(){return L&&L.counterText||String(level)}
+function counterStr(){return roll?String(roll.last):(L&&L.counterText||String(level))}
 function onCounter(p){const w=textW(counterStr(),3);return p.x>=ctr.x-6&&p.x<=ctr.x+w+6&&p.y>=ctr.y-6&&p.y<=ctr.y+21}
 app.addEventListener('pointerdown',e=>{
   e.preventDefault();audio();const p=toP(e);
@@ -421,6 +424,8 @@ function update(dt){
   shakeA*=Math.pow(.84,k);flashA*=Math.pow(.86,k);
   ctrV+=(0-ctrOff)*.25*k;ctrV*=Math.pow(.7,k);ctrOff+=ctrV*k;
   if(wipe){wipe.t+=dt;if(wipe.t>=.3){if(wipe.phase==='out'){wipe.phase='in';wipe.t=0;wipe.mid&&wipe.mid()}else{const d=wipe.done;wipe=null;d&&d()}}}
+  if(roll){roll.t+=dt;const v=Math.round(roll.from-(roll.from-roll.to)*clamp(roll.t/.36,0,1));
+    if(v!==roll.last){roll.last=v;sfx.tick();ctrOff=-3;ctrV=0}if(roll.t>=.36)roll=null}
   if(L&&L.update)L.update(dt);
   if(level>LAST&&Math.random()<.5&&parts.length<300)parts.push({x:Math.random()*W,y:-2,vx:(Math.random()-.5)*.5,vy:.3+Math.random()*.6,life:2,dec:.006,col:RAINBOW[rand(6)],s:1+rand(2),g:.004});
 }
