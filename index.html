@@ -6,6 +6,11 @@
 <meta name="theme-color" content="#1a1c2c">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Figure It Out">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-180.png">
 <title>Figure It Out</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <style>
@@ -391,13 +396,15 @@ function counterStr(){return roll?String(roll.last):(L&&L.counterText||String(le
 function onCounter(p){const w=textW(counterStr(),3);return p.x>=ctr.x-6&&p.x<=ctr.x+w+6&&p.y>=ctr.y-6&&p.y<=ctr.y+21}
 app.addEventListener('pointerdown',e=>{
   e.preventDefault();audio();const p=toP(e);
-  if(level===0){if(!busy)go(1,'pass');return}
+  if(level===0){if(busy)return;if(iosPanel){iosPanel=false;return}if(hitInstall(p)){installBtn.pressed=e.pointerId;sfx.tap();return}go(1,'pass');return}
   if(level>LAST){if(!busy)go(0,'pass');return}
   if(busy)return;
   L.down(p,e,onCounter(p));
 });
 addEventListener('pointermove',e=>{if(L&&L.move)L.move(toP(e),e)});
-addEventListener('pointerup',e=>{if(L&&L.up)L.up(toP(e),e)});
+addEventListener('pointerup',e=>{
+  if(installBtn.pressed===e.pointerId){installBtn.pressed=null;if(level===0&&hitInstall(toP(e)))doInstall();return}
+  if(L&&L.up)L.up(toP(e),e)});
 addEventListener('pointercancel',e=>{if(L&&L.up)L.up(toP(e),e)});
 document.addEventListener('contextmenu',e=>e.preventDefault());
 
@@ -423,6 +430,7 @@ function update(dt){
   rings=rings.filter(r=>r.life>0);
   shakeA*=Math.pow(.84,k);flashA*=Math.pow(.86,k);
   ctrV+=(0-ctrOff)*.25*k;ctrV*=Math.pow(.7,k);ctrOff+=ctrV*k;
+  installBtn.v+=(installBtn.tsc-installBtn.sc)*.25*k;installBtn.v*=Math.pow(.7,k);installBtn.sc+=installBtn.v*k;
   if(wipe){wipe.t+=dt;if(wipe.t>=.3){if(wipe.phase==='out'){wipe.phase='in';wipe.t=0;wipe.mid&&wipe.mid()}else{const d=wipe.done;wipe=null;d&&d()}}}
   if(roll){roll.t+=dt;const v=Math.round(roll.from-(roll.from-roll.to)*clamp(roll.t/.36,0,1));
     if(v!==roll.last){roll.last=v;sfx.tick();ctrOff=-3;ctrV=0}if(roll.t>=.36)roll=null}
@@ -466,6 +474,7 @@ function draw(){
     put(ctx,'?',qx,qy,z,'#ffcd75');
     wave('FIGURE IT OUT',W/2,H*.62,2,0,RAINBOW);
     ctx.globalAlpha=.4+Math.sin(T*3)*.2;drawText('BETA',W/2,H*.62+20,1,'#94b0c2',true);ctx.globalAlpha=1;
+    drawInstallUI();
   }else if(level>LAST){
     wave('YOU FIGURED',W/2,H*.32,2,0,RAINBOW);
     wave('IT OUT',W/2,H*.32+16,4,1,['#ffcd75']);
@@ -506,6 +515,36 @@ function resize(){
   if(changed&&level>=1&&level<=LAST&&!busy&&!wipe)setLevel(level);
 }
 addEventListener('resize',resize);
+
+/* ---------- install (only on the real site, never inside an embed) ---------- */
+let TOP=false;try{TOP=window.top===window}catch(e){}
+const isIOS=/iphone|ipad|ipod/i.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+const isStandalone=()=>matchMedia('(display-mode: standalone)').matches||matchMedia('(display-mode: fullscreen)').matches||navigator.standalone===true;
+let deferredPrompt=null,installed=false,iosPanel=false;
+const installBtn={w:76,h:24,sc:1,v:0,tsc:1,ramp:R.green,a:1,tz:2,text:'INSTALL',pressed:null};
+const canInstall=()=>TOP&&!installed&&!isStandalone()&&(deferredPrompt||isIOS);
+const btnY=()=>Math.round(H*.82);
+const hitInstall=p=>canInstall()&&Math.abs(p.x-W/2)<=installBtn.w/2+4&&Math.abs(p.y-btnY())<=installBtn.h/2+4;
+addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredPrompt=e});
+addEventListener('appinstalled',()=>{installed=true;deferredPrompt=null});
+if(TOP&&'serviceWorker' in navigator&&location.protocol==='https:')navigator.serviceWorker.register('sw.js').catch(()=>{});
+function doInstall(){
+  if(deferredPrompt){const d=deferredPrompt;d.prompt();d.userChoice.then(c=>{if(c.outcome==='accepted')installed=true}).catch(()=>{});deferredPrompt=null;return}
+  if(isIOS)iosPanel=true;
+}
+function drawShareIcon(x,y,z){ctx.fillStyle='#73eff7';const f=(a,b,w,h)=>ctx.fillRect(x+a*z,y+b*z,w*z,h*z);
+  f(0,4,1,7);f(8,4,1,7);f(0,10,9,1);f(0,4,3,1);f(6,4,3,1);f(4,0,1,8);f(3,1,3,1);f(2,2,1,1);f(6,2,1,1)}
+function drawInstallUI(){
+  if(canInstall()){installBtn.tsc=installBtn.pressed!==null?.9:1+Math.sin(T*3)*.03;drawPill(installBtn,W/2,btnY())}
+  if(iosPanel){
+    ctx.globalAlpha=.92;ctx.fillStyle=SH;ctx.fillRect(0,0,W,H);ctx.globalAlpha=1;
+    const y=Math.round(H*.3);
+    drawText('ADD TO YOUR',W/2,y,2,'#ffcd75',true,'#5d275d');drawText('HOME SCREEN',W/2,y+13,2,'#ffcd75',true,'#5d275d');
+    drawText('1. TAP',W/2-14,y+40,2,'#f4f4f4',true);drawShareIcon(Math.round(W/2+18),y+35,2);
+    drawText('2. ADD TO',W/2,y+58,2,'#f4f4f4',true);drawText('HOME SCREEN',W/2,y+71,2,'#f4f4f4',true);
+    ctx.globalAlpha=.5+Math.sin(T*3)*.2;drawText('TAP TO CLOSE',W/2,y+100,1,'#94b0c2',true);ctx.globalAlpha=1;
+  }
+}
 
 /* ---------- loop + boot ---------- */
 let last=performance.now();
